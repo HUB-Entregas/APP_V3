@@ -29,20 +29,22 @@
 </header>
 
 <main>
+  <div class="motorista-bar">
+    <span class="motorista-bar-nome">👤 <strong id="motoristaAtualNome"></strong></span>
+    <button type="button" id="trocarMotorista" class="motorista-bar-trocar">Trocar</button>
+  </div>
+
   <div id="aviso" class="aviso hidden"></div>
 
   <form id="formEntrega">
     <div class="campo">
-      <div class="eyebrow"><span class="num">01</span><label>Motorista</label></div>
-      <div id="motoristaAtual" class="motorista-atual">
-        <span id="motoristaAtualNome"></span>
-        <button type="button" id="trocarMotorista">Trocar</button>
-      </div>
+      <div class="eyebrow"><span class="num">01</span><label for="recebedor">Nome do recebedor</label></div>
+      <input type="text" id="recebedor" placeholder="Ex: João Silva" autocomplete="name" autocapitalize="words" required>
     </div>
 
     <div class="campo">
-      <div class="eyebrow"><span class="num">02</span><label for="recebedor">Nome do recebedor</label></div>
-      <input type="text" id="recebedor" placeholder="Ex: João Silva" autocomplete="name" autocapitalize="words" required>
+      <div class="eyebrow"><span class="num">02</span><label for="observacao">Observação (opcional)</label></div>
+      <textarea id="observacao" placeholder="Ex: entregue na portaria"></textarea>
     </div>
 
     <div class="campo">
@@ -65,10 +67,6 @@
       <input type="file" id="fotoFachadaInput" accept="image/*" capture="environment" class="hidden">
     </div>
 
-    <div class="campo">
-      <div class="eyebrow"><span class="num">04</span><label for="observacao">Observação (opcional)</label></div>
-      <textarea id="observacao" placeholder="Ex: entregue na portaria"></textarea>
-    </div>
   </form>
 
   <div class="secao-historico">
