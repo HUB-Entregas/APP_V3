@@ -1,8 +1,12 @@
-// Senha fica só em memória (nunca salva no navegador) — ao atualizar
-// a página, o administrador precisa entrar de novo. É intencional.
-let senhaAtual = null;
+// Token de administrador fica só EM MEMÓRIA (nunca salvo no navegador) — ao
+// atualizar a página, o administrador precisa entrar de novo. É intencional.
+// Ele é emitido pelo backend no login (acao 'admin-login') e enviado em todas
+// as chamadas do painel (listar / finalizar / foto), sempre por POST — a senha
+// nunca vai na URL.
+let adminToken = null;
 let registrosCache = [];
 let listaRenderizada = []; // última lista mostrada na tabela (base p/ o modal)
+const cacheFotos = {};     // id do Drive -> dataUrl (evita rebaixar a mesma 2x)
 
 function el(id) { return document.getElementById(id); }
 
@@ -16,11 +20,20 @@ function formatarData(iso) {
   return d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
 }
 
-async function buscarComprovantes(senha) {
-  const url = `${CONFIG.API_URL}?acao=listar&senha=${encodeURIComponent(senha)}`;
-  const resp = await fetch(url);
+async function apiPost(payload) {
+  const resp = await fetch(CONFIG.API_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify(payload)
+  });
   if (!resp.ok) throw new Error('HTTP ' + resp.status);
   return resp.json();
+}
+
+// se o backend disser que a sessão expirou (token de 8h venceu), volta ao login
+function sessaoExpirou(data) {
+  if (data && data.authErro) { sair(); mostrarErroLogin('Sessão expirada. Entre novamente.'); return true; }
+  return false;
 }
 
 async function fazerLogin() {
@@ -32,12 +45,18 @@ async function fazerLogin() {
   el('loginErro').classList.add('hidden');
 
   try {
-    const data = await buscarComprovantes(senha);
-    if (data.status !== 'ok') {
-      mostrarErroLogin(data.message || 'Senha incorreta.');
+    const login = await apiPost({ acao: 'admin-login', senha });
+    if (login.status !== 'ok' || !login.token) {
+      mostrarErroLogin(login.message || 'Senha incorreta.');
       return;
     }
-    senhaAtual = senha;
+    adminToken = login.token;
+    const data = await apiPost({ acao: 'listar', token: adminToken });
+    if (data.status !== 'ok') {
+      adminToken = null;
+      mostrarErroLogin(data.message || 'Não foi possível carregar os comprovantes.');
+      return;
+    }
     registrosCache = data.registros;
     mostrarPainel();
   } catch (err) {
@@ -62,23 +81,26 @@ function mostrarPainel() {
 }
 
 function sair() {
-  senhaAtual = null;
+  adminToken = null;
   registrosCache = [];
+  listaRenderizada = [];
+  for (const k in cacheFotos) delete cacheFotos[k]; // não guarda fotos após sair
   el('senhaInput').value = '';
   el('busca').value = '';
+  fecharFoto();
   el('telaPainel').classList.add('hidden');
   el('btnSair').classList.add('hidden');
-  el('loginErro').classList.add('hidden');
   el('telaLogin').classList.remove('hidden');
 }
 
 async function atualizar() {
-  if (!senhaAtual) return;
+  if (!adminToken) return;
   const botao = el('btnAtualizar');
   botao.disabled = true;
   botao.textContent = 'Atualizando…';
   try {
-    const data = await buscarComprovantes(senhaAtual);
+    const data = await apiPost({ acao: 'listar', token: adminToken });
+    if (sessaoExpirou(data)) return;
     if (data.status === 'ok') {
       registrosCache = data.registros;
       renderTabela(filtrarPorBusca(registrosCache));
@@ -107,6 +129,11 @@ function botaoFinalizado(r) {
   return `<button type="button" class="btn-finalizar ${finalizado ? 'is-finalizado' : ''}" data-id="${escapeHtml(r.id)}" data-finalizado="${finalizado}" ${atributos}>${finalizado ? '✔ Finalizado' : 'Finalizado'}</button>`;
 }
 
+function botaoFoto(r, i, tipo, temFoto) {
+  if (!temFoto) return '—';
+  return `<button type="button" class="btn-foto-mini" data-idx="${i}" data-tipo="${tipo}">📷 Ver</button>`;
+}
+
 function renderTabela(lista) {
   listaRenderizada = lista;
   const corpo = el('tabelaCorpo');
@@ -126,23 +153,25 @@ function renderTabela(lista) {
       <td>${escapeHtml(r.motorista)}</td>
       <td>${escapeHtml(r.recebedor)}</td>
       <td>${escapeHtml(r.observacao)}</td>
-      <td>${r.fotoPacoteImg ? `<img src="${escapeHtml(r.fotoPacoteImg)}" class="miniatura" data-idx="${i}" data-tipo="pacote" alt="Foto do pacote de ${escapeHtml(r.recebedor)}" loading="lazy">` : '—'}</td>
-      <td>${r.fotoFachadaImg ? `<img src="${escapeHtml(r.fotoFachadaImg)}" class="miniatura" data-idx="${i}" data-tipo="fachada" alt="Foto da fachada de ${escapeHtml(r.recebedor)}" loading="lazy">` : '—'}</td>
+      <td>${botaoFoto(r, i, 'pacote', !!r.fotoPacoteId)}</td>
+      <td>${botaoFoto(r, i, 'fachada', !!r.fotoFachadaId)}</td>
       <td>${botaoFinalizado(r)}</td>
     </tr>`).join('');
   corpo.innerHTML = linhas;
 }
 
 // ---------- modal de fotos (galeria pacote/fachada + zoom) ----------
-let modalFotos = [];   // [{ url, legenda }] do comprovante aberto
+// As fotos são PRIVADAS no Drive: cada uma é buscada sob demanda pela rota
+// 'foto' (autenticada) só quando o admin abre o modal — nada é carregado à toa.
+let modalFotos = [];   // [{ id, legenda }] do comprovante aberto
 let modalIndice = 0;
 let zoom = 1, panX = 0, panY = 0;
 let arrastando = false, arrasteOrigem = null, arrastou = false;
 
 function abrirModal(registro, tipoInicial) {
   modalFotos = [];
-  if (registro.fotoPacoteImg) modalFotos.push({ url: registro.fotoPacoteImg, legenda: 'Foto do pacote' });
-  if (registro.fotoFachadaImg) modalFotos.push({ url: registro.fotoFachadaImg, legenda: 'Foto da fachada' });
+  if (registro.fotoPacoteId) modalFotos.push({ id: registro.fotoPacoteId, legenda: 'Foto do pacote' });
+  if (registro.fotoFachadaId) modalFotos.push({ id: registro.fotoFachadaId, legenda: 'Foto da fachada' });
   if (modalFotos.length === 0) return;
 
   const inicial = modalFotos.findIndex((f) => f.legenda.toLowerCase().includes(tipoInicial));
@@ -154,18 +183,42 @@ function abrirModal(registro, tipoInicial) {
   obs.textContent = registro.observacao || '';
   obs.classList.toggle('hidden', !registro.observacao);
 
-  mostrarFotoAtual();
   el('modalFoto').classList.remove('hidden');
+  mostrarFotoAtual();
 }
 
-function mostrarFotoAtual() {
+async function mostrarFotoAtual() {
   const foto = modalFotos[modalIndice];
-  el('modalImg').src = foto.url;
   el('modalLegenda').textContent = `${foto.legenda} — ${modalIndice + 1}/${modalFotos.length}`;
   const temVarias = modalFotos.length > 1;
   el('modalAnterior').classList.toggle('hidden', !temVarias);
   el('modalProximo').classList.toggle('hidden', !temVarias);
   resetarZoom();
+
+  const img = el('modalImg');
+
+  // já em cache? mostra na hora
+  if (cacheFotos[foto.id]) { img.src = cacheFotos[foto.id]; el('modalCarregando').classList.add('hidden'); return; }
+
+  img.src = '';
+  el('modalCarregando').classList.remove('hidden');
+  const idAlvo = foto.id;
+  try {
+    const data = await apiPost({ acao: 'foto', token: adminToken, id: idAlvo });
+    if (sessaoExpirou(data)) return;
+    if (data.status === 'ok' && data.dataUrl) {
+      cacheFotos[idAlvo] = data.dataUrl;
+      // só aplica se ainda for a foto atual (o admin pode ter navegado/fechado)
+      const atual = modalFotos[modalIndice];
+      if (atual && atual.id === idAlvo && !el('modalFoto').classList.contains('hidden')) {
+        img.src = data.dataUrl;
+      }
+    }
+  } catch (err) {
+    // deixa vazio; o admin pode navegar de novo para tentar
+  } finally {
+    el('modalCarregando').classList.add('hidden');
+  }
 }
 
 function navegarFoto(delta) {
@@ -197,6 +250,7 @@ function alternarZoom() {
 function fecharFoto() {
   el('modalFoto').classList.add('hidden');
   el('modalImg').src = '';
+  el('modalCarregando').classList.add('hidden');
   resetarZoom();
 }
 
@@ -204,12 +258,8 @@ async function toggleFinalizado(id, novoValor) {
   if (!id) return;
   atualizarFinalizadoLocal(id, novoValor); // atualiza a tela na hora
   try {
-    const resp = await fetch(CONFIG.API_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ acao: 'finalizar', senha: senhaAtual, id, valor: novoValor })
-    });
-    const data = await resp.json();
+    const data = await apiPost({ acao: 'finalizar', token: adminToken, id, valor: novoValor });
+    if (data.authErro) { atualizarFinalizadoLocal(id, !novoValor); sessaoExpirou(data); return; }
     if (data.status !== 'ok') {
       atualizarFinalizadoLocal(id, !novoValor); // reverte se falhou
       alert(data.message || 'Não foi possível atualizar. Tente novamente.');
@@ -234,13 +284,12 @@ window.addEventListener('DOMContentLoaded', () => {
   el('busca').addEventListener('input', () => renderTabela(filtrarPorBusca(registrosCache)));
   el('senhaInput').focus();
 
-  // delegação de eventos: clique na miniatura abre o modal,
-  // clique no botão alterna o status de finalizado
+  // delegação de eventos: "Ver" abre o modal (busca a foto), botão alterna status
   el('tabelaCorpo').addEventListener('click', (e) => {
-    const img = e.target.closest('.miniatura');
-    if (img) {
-      const registro = listaRenderizada[Number(img.dataset.idx)];
-      if (registro) abrirModal(registro, img.dataset.tipo);
+    const btnFoto = e.target.closest('.btn-foto-mini');
+    if (btnFoto) {
+      const registro = listaRenderizada[Number(btnFoto.dataset.idx)];
+      if (registro) abrirModal(registro, btnFoto.dataset.tipo);
       return;
     }
     const btn = e.target.closest('.btn-finalizar');

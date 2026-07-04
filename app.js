@@ -31,6 +31,7 @@ let sincronizando = false;
 let cameraStream = null;
 let cameraFila = [];   // tipos a capturar em sequência, ex: ['pacote','fachada']
 let cameraTotal = 0;
+let flashLigado = false;
 
 // ---------- utilidades ----------
 
@@ -155,7 +156,13 @@ async function handleFotoSelecionada(tipo, e) {
   if (!file) return;
   try {
     aplicarFoto(tipo, await comprimirFoto(file));
+    // se ainda falta foto na fila do fallback, abre a próxima direto
+    if (fallbackFila.length > 0) {
+      const proximo = fallbackFila.shift();
+      el(proximo === 'pacote' ? 'fotoPacoteInput' : 'fotoFachadaInput').click();
+    }
   } catch (err) {
+    fallbackFila = [];
     resetarSlotFoto(tipo);
     mostrarAviso('Não foi possível processar essa foto. Tente novamente.');
   }
@@ -184,10 +191,59 @@ async function abrirCamera(tipos) {
   el('cameraOverlay').classList.remove('hidden');
   atualizarRotuloCamera();
   try { await video.play(); } catch (e) { /* alguns navegadores já dão play sozinho */ }
+  configurarFlash();
 }
+
+// ---------- flash (lanterna do celular) ----------
+// Só funciona onde o navegador expõe o "torch" da câmera (Android/Chrome).
+// No iPhone/Safari não é suportado, então o botão fica escondido.
+
+function pegarTrackVideo() {
+  return cameraStream && cameraStream.getVideoTracks ? cameraStream.getVideoTracks()[0] : null;
+}
+
+function configurarFlash() {
+  const btn = el('cameraFlash');
+  const track = pegarTrackVideo();
+  let suporta = false;
+  try {
+    suporta = !!(track && track.getCapabilities && track.getCapabilities().torch);
+  } catch (e) { suporta = false; }
+
+  flashLigado = false;
+  btn.classList.remove('flash-ligado');
+  btn.classList.toggle('hidden', !suporta);
+
+  // reaplica a preferência salva (o motorista não precisa religar toda vez)
+  if (suporta && localStorage.getItem('flashLigado') === '1') {
+    aplicarFlash(true);
+  }
+}
+
+async function aplicarFlash(ligar) {
+  const track = pegarTrackVideo();
+  if (!track) return;
+  try {
+    await track.applyConstraints({ advanced: [{ torch: ligar }] });
+    flashLigado = ligar;
+    el('cameraFlash').classList.toggle('flash-ligado', ligar);
+    localStorage.setItem('flashLigado', ligar ? '1' : '0');
+  } catch (err) {
+    // aparelho não deixou mudar o flash — ignora
+  }
+}
+
+function alternarFlash() {
+  aplicarFlash(!flashLigado);
+}
+
+// fila do fallback: se a câmera nativa for usada para mais de uma foto,
+// a próxima é aberta automaticamente quando a anterior é escolhida
+let fallbackFila = [];
 
 function abrirFallbackNativo() {
   const tipo = cameraFila[0];
+  fallbackFila = cameraFila.slice(1);
   cameraFila = [];
   el(tipo === 'pacote' ? 'fotoPacoteInput' : 'fotoFachadaInput').click();
 }
@@ -208,9 +264,17 @@ function capturarFrameComprimido(video, maxLargura = 1400, qualidade = 0.72) {
   return canvas.toDataURL('image/jpeg', qualidade);
 }
 
+let ultimoDisparoTs = 0;
+
 function dispararFoto() {
   const video = el('cameraVideo');
   if (!video.videoWidth) return; // vídeo ainda não pronto
+  // toque duplo acidental no obturador capturaria as 2 fotos com o MESMO
+  // enquadramento — ignora disparos em sequência muito rápida
+  const agora = Date.now();
+  if (agora - ultimoDisparoTs < 500) return;
+  ultimoDisparoTs = agora;
+
   const tipo = cameraFila.shift();
   aplicarFoto(tipo, capturarFrameComprimido(video));
   if (cameraFila.length === 0) fecharCamera();
@@ -219,9 +283,11 @@ function dispararFoto() {
 
 function fecharCamera() {
   if (cameraStream) {
-    cameraStream.getTracks().forEach((t) => t.stop());
+    cameraStream.getTracks().forEach((t) => t.stop()); // apagar as tracks já desliga o flash
     cameraStream = null;
   }
+  flashLigado = false;
+  el('cameraFlash').classList.remove('flash-ligado');
   el('cameraVideo').srcObject = null;
   el('cameraOverlay').classList.add('hidden');
   cameraFila = [];
@@ -229,24 +295,56 @@ function fecharCamera() {
 
 // ---------- envio e sincronização ----------
 
+function erroAuth(msg) {
+  const e = new Error(msg);
+  e.authErro = true;
+  return e;
+}
+
 async function enviarAoBackend(registro) {
-  const resp = await fetch(CONFIG.API_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify({
-      token: CONFIG.TOKEN,
-      id: registro.id,
-      motorista: registro.motorista,
-      recebedor: registro.recebedor,
-      observacao: registro.observacao,
-      fotoPacote: registro.fotoPacote,
-      fotoFachada: registro.fotoFachada,
-      timestamp: registro.timestamp
-    })
-  });
+  // o token de sessão (do login) autoriza a gravação — lido na hora do envio,
+  // então os pendentes sobem com o token atual mesmo após um relogin
+  const token = localStorage.getItem('authToken');
+  if (!token) throw erroAuth('Sem sessão');
+
+  // timeout: em troca de rede (Wi-Fi -> 4G) o fetch pode "pendurar" por
+  // minutos; aborta e deixa a próxima sincronização tentar de novo
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 60000);
+  let resp;
+  try {
+    resp = await fetch(CONFIG.API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      signal: ctrl.signal,
+      body: JSON.stringify({
+        token: token,
+        id: registro.id,
+        motorista: registro.motorista,
+        recebedor: registro.recebedor,
+        observacao: registro.observacao,
+        fotoPacote: registro.fotoPacote,
+        fotoFachada: registro.fotoFachada,
+        timestamp: registro.timestamp
+      })
+    });
+  } finally {
+    clearTimeout(timer);
+  }
   if (!resp.ok) throw new Error('HTTP ' + resp.status);
   const data = await resp.json();
-  if (data.status !== 'ok') throw new Error(data.message || 'Falha no envio');
+  if (data.status !== 'ok') {
+    if (data.authErro) throw erroAuth(data.message || 'Sessão expirada');
+    throw new Error(data.message || 'Falha no envio');
+  }
+}
+
+// sessão expirada (token venceu): limpa e volta ao login. Os comprovantes
+// pendentes continuam salvos e sobem depois que o motorista entrar de novo.
+function irParaLogin() {
+  localStorage.removeItem('authToken');
+  localStorage.removeItem('motoristaSelecionado');
+  window.location.href = './login.html';
 }
 
 async function sincronizarPendentes() {
@@ -254,6 +352,7 @@ async function sincronizarPendentes() {
   sincronizando = true;
   await atualizarStatusConexao();
 
+  let sessaoExpirada = false;
   const pendentes = (await listarComprovantesLocais()).filter((r) => r.status === 'pendente');
   for (const registro of pendentes) {
     try {
@@ -263,6 +362,9 @@ async function sincronizarPendentes() {
       await salvarComprovanteLocal(registro);
       await renderHistorico();
     } catch (err) {
+      // sessão expirada: não conta como "erro" do comprovante — para tudo e
+      // manda relogar; os pendentes ficam salvos e sobem após o novo login
+      if (err && err.authErro) { sessaoExpirada = true; break; }
       // registra a falha (para ficar visível ao motorista) e continua com os
       // próximos; este permanece pendente e será retentado depois
       registro.tentativas = (registro.tentativas || 0) + 1;
@@ -271,6 +373,8 @@ async function sincronizarPendentes() {
       await renderHistorico();
     }
   }
+
+  if (sessaoExpirada) { sincronizando = false; irParaLogin(); return; }
 
   await podarFotosAntigas();
 
@@ -296,8 +400,11 @@ async function podarFotosAntigas() {
   }
 }
 
+let enviando = false; // trava contra toque duplo no "Enviar" (evita duplicata)
+
 async function handleSubmit(e) {
   e.preventDefault();
+  if (enviando) return;
   esconderAviso();
 
   const motorista = motoristaSelecionadoAtual();
@@ -309,21 +416,30 @@ async function handleSubmit(e) {
   if (!fotoPacoteBase64) return mostrarAviso('Tire a foto do pacote.');
   if (!fotoFachadaBase64) return mostrarAviso('Tire a foto da fachada.');
 
-  const registro = {
-    id: gerarId(),
-    motorista,
-    recebedor,
-    observacao,
-    fotoPacote: fotoPacoteBase64,
-    fotoFachada: fotoFachadaBase64,
-    timestamp: Date.now(),
-    status: 'pendente'
-  };
+  enviando = true;
+  const botao = el('btnEnviar');
+  botao.disabled = true;
 
-  await salvarComprovanteLocal(registro);
-  resetarFormulario();
-  await renderHistorico();
-  sincronizarPendentes();
+  try {
+    const registro = {
+      id: gerarId(),
+      motorista,
+      recebedor,
+      observacao,
+      fotoPacote: fotoPacoteBase64,
+      fotoFachada: fotoFachadaBase64,
+      timestamp: Date.now(),
+      status: 'pendente'
+    };
+
+    await salvarComprovanteLocal(registro);
+    resetarFormulario();
+    await renderHistorico();
+    sincronizarPendentes();
+  } finally {
+    enviando = false;
+    botao.disabled = false;
+  }
 }
 
 function resetarFormulario() {
@@ -442,10 +558,17 @@ window.addEventListener('DOMContentLoaded', async () => {
     navigator.serviceWorker.register('./sw.js');
   }
 
+  // pede ao navegador para NÃO apagar o armazenamento deste app quando o
+  // celular ficar sem espaço — protege a fila offline de comprovantes
+  if (navigator.storage && navigator.storage.persist) {
+    navigator.storage.persist().catch(() => {});
+  }
+
   mostrarMotoristaAtual(motoristaSelecionadoAtual());
 
   el('trocarMotorista').addEventListener('click', () => {
     localStorage.removeItem('motoristaSelecionado');
+    localStorage.removeItem('authToken');
     window.location.href = './login.html';
   });
 
@@ -459,6 +582,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   el('slotFachada').addEventListener('click', () => abrirCamera(['fachada']));
   el('cameraDisparo').addEventListener('click', dispararFoto);
   el('cameraFechar').addEventListener('click', fecharCamera);
+  el('cameraFlash').addEventListener('click', alternarFlash);
 
   el('formEntrega').addEventListener('submit', handleSubmit);
   el('btnSincronizar').addEventListener('click', handleSincronizarClick);
@@ -472,6 +596,15 @@ window.addEventListener('DOMContentLoaded', async () => {
   window.addEventListener('online', () => { sincronizarPendentes(); });
   window.addEventListener('offline', () => { atualizarStatusConexao(); });
   setInterval(() => { if (navigator.onLine) sincronizarPendentes(); }, 25000);
+
+  // Android suspende o app em segundo plano (o intervalo acima congela);
+  // ao voltar para o primeiro plano, sincroniza e atualiza o status na hora
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) {
+      atualizarStatusConexao();
+      sincronizarPendentes();
+    }
+  });
 
   await renderHistorico();
   await atualizarStatusConexao();

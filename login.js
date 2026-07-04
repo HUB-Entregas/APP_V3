@@ -12,11 +12,20 @@ function mostrarAviso(msg) {
 }
 
 async function verificarSenha(nome, senha) {
-  const resp = await fetch(CONFIG.API_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify({ acao: 'login', nome, senha })
-  });
+  // timeout: rede instável não pode deixar o botão preso em "Entrando…"
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 30000);
+  let resp;
+  try {
+    resp = await fetch(CONFIG.API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      signal: ctrl.signal,
+      body: JSON.stringify({ acao: 'login', nome, senha })
+    });
+  } finally {
+    clearTimeout(timer);
+  }
   if (!resp.ok) throw new Error('HTTP ' + resp.status);
   return resp.json();
 }
@@ -45,8 +54,9 @@ window.addEventListener('DOMContentLoaded', () => {
 
     try {
       const data = await verificarSenha(nome, senha.value);
-      if (data.status === 'ok') {
+      if (data.status === 'ok' && data.token) {
         localStorage.setItem('motoristaSelecionado', nome);
+        localStorage.setItem('authToken', data.token); // token de sessão p/ gravar comprovantes
         window.location.replace('./index.html');
         return;
       }

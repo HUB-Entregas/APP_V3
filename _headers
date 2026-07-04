@@ -1,0 +1,9 @@
+# Cabeçalhos de segurança (Netlify lê este arquivo automaticamente).
+# O GitHub Pages NÃO suporta cabeçalhos personalizados — nesse caso vale só a
+# CSP via <meta> nas páginas HTML. As diretivas abaixo (frame-ancestors,
+# X-Frame-Options, Referrer-Policy) só têm efeito por cabeçalho HTTP.
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' https://script.google.com https://script.googleusercontent.com; worker-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
+  X-Frame-Options: DENY
+  Referrer-Policy: no-referrer
+  X-Content-Type-Options: nosniff

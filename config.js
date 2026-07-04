@@ -10,10 +10,9 @@
 // ============================================================
 const CONFIG = {
   API_URL: 'https://script.google.com/macros/s/AKfycbwLtGCY_46qVBnzMD5fJ87KOIT4WTQHZ1hv_52n5KjfJJpKYusHn9LAXjUstwpm1LQ/exec',
-  TOKEN: 'HUB-ENTREGAS',
-  // Só os NOMES dos motoristas ficam aqui (não é dado sensível — é o que
-  // aparece na lista da tela de login). As SENHAS ficam no backend
-  // (backend/Code.gs, mapa MOTORISTAS), conferidas no servidor no momento
-  // do login, para não ficarem visíveis neste arquivo público.
+  // Não há mais senha nem token neste arquivo público. A escrita de
+  // comprovantes agora exige um token de sessão emitido no login (guardado no
+  // aparelho). As SENHAS dos motoristas ficam no backend (Code.gs, MOTORISTAS).
+  // Aqui ficam só os NOMES (o que aparece na lista de login) — não é sensível.
   MOTORISTAS: ['Mello', 'Vinicius', 'Said', 'Matheus Silva', 'Joao', 'Thales', 'Bruno', 'Pedro']
 };

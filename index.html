@@ -2,12 +2,8 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<script>
-  // Sem motorista logado, manda para a tela de login (aba separada).
-  if (!localStorage.getItem('motoristaSelecionado')) {
-    window.location.replace('./login.html');
-  }
-</script>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' https://script.google.com https://script.googleusercontent.com; worker-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
+<script src="./guarda.js" data-modo="requer-login"></script>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#12203A">
 <title>Comprovante de Entrega</title>
@@ -88,6 +84,7 @@
   <div class="camera-topo">
     <button type="button" id="cameraFechar" class="camera-fechar" aria-label="Fechar câmera">✕</button>
     <span id="cameraRotulo" class="camera-rotulo"></span>
+    <button type="button" id="cameraFlash" class="camera-flash hidden" aria-label="Ligar/desligar flash">🔦</button>
   </div>
   <div class="camera-controles">
     <button type="button" id="cameraDisparo" class="camera-disparo" aria-label="Tirar foto"></button>
@@ -95,7 +92,7 @@
 </div>
 
 <div class="barra-envio">
-  <button type="submit" form="formEntrega" class="btn-enviar">Enviar comprovante</button>
+  <button type="submit" id="btnEnviar" form="formEntrega" class="btn-enviar">Enviar comprovante</button>
 </div>
 
 <script src="./config.js"></script>

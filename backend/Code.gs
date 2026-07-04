@@ -5,7 +5,7 @@
  * 1. Crie uma planilha nova no Google Sheets.
  * 2. Menu Extensões > Apps Script.
  * 3. Apague o código de exemplo e cole este arquivo inteiro.
- * 4. Troque o valor de TOKEN e ADMIN_SENHA abaixo por senhas só suas.
+ * 4. Troque ADMIN_SENHA, SEGREDO e as senhas em MOTORISTAS por valores só seus.
  * 5. Implantar > Nova implantação > tipo "App da Web".
  *    - Executar como: Eu
  *    - Quem pode acessar: Qualquer pessoa
@@ -16,8 +16,20 @@
  * (lápis) > Nova versão > Implantar — senão as mudanças não valem.
  */
 
-var TOKEN = 'HUB-ENTREGAS';
 var ADMIN_SENHA = 'ADMIN3917';
+
+// SEGREDO do servidor: usado para ASSINAR os tokens de sessão (login).
+// Fica SÓ aqui no backend, nunca no app. TROQUE por um texto longo e
+// aleatório (ex.: 40+ caracteres). Se trocar depois, todos precisam relogar.
+var SEGREDO = 'TROQUE_POR_UM_SEGREDO_LONGO_E_ALEATORIO_9f3k2xQ';
+
+// Proteção contra força bruta (login do motorista e do admin).
+var MAX_FALHAS = 5;                 // tentativas erradas antes de bloquear
+var JANELA_BLOQUEIO_SEG = 15 * 60;  // por quanto tempo o bloqueio dura (15 min)
+
+// Validades dos tokens de sessão.
+var TTL_MOTORISTA = 30 * 24 * 60 * 60 * 1000; // 30 dias (por causa da fila offline)
+var TTL_ADMIN = 8 * 60 * 60 * 1000;           // 8 horas
 
 // Senhas dos motoristas — ficam SÓ aqui no backend (não no config.js público).
 // A tela de login (login.html) envia nome + senha e o servidor confere abaixo.
@@ -43,20 +55,32 @@ function doPost(e) {
   try {
     var dados = JSON.parse(e.postData.contents);
 
-    if (dados.acao === 'login') {
-      return verificarLogin(dados);
-    }
+    if (dados.acao === 'login') return verificarLogin(dados);
+    if (dados.acao === 'admin-login') return verificarAdminLogin(dados);
+    if (dados.acao === 'listar') return listarComprovantes(dados);
+    if (dados.acao === 'foto') return obterFoto(dados);
+    if (dados.acao === 'finalizar') return marcarFinalizado(dados);
 
-    if (dados.acao === 'finalizar') {
-      return marcarFinalizado(dados);
-    }
-
-    // envio normal de um novo comprovante (motorista)
-    if (dados.token !== TOKEN) {
-      return responder({ status: 'error', message: 'Token inválido' });
+    // envio normal de um novo comprovante — exige um token de sessão de
+    // motorista válido (emitido no login), no lugar do antigo TOKEN público
+    var sessao = verificarToken(dados.token, 'motorista');
+    if (!sessao) {
+      return responder({ status: 'error', message: 'Sessão expirada. Entre novamente.', authErro: true });
     }
     if (!dados.recebedor || !dados.motorista) {
       return responder({ status: 'error', message: 'Dados incompletos' });
+    }
+    // o comprovante só pode ser gravado no nome do próprio motorista logado
+    if (String(sessao.sub) !== String(dados.motorista)) {
+      return responder({ status: 'error', message: 'Motorista não confere com a sessão.', authErro: true });
+    }
+    // limites de tamanho — barram abuso mesmo com sessão válida
+    if ((dados.fotoPacote && dados.fotoPacote.length > 4 * 1024 * 1024) ||
+        (dados.fotoFachada && dados.fotoFachada.length > 4 * 1024 * 1024)) {
+      return responder({ status: 'error', message: 'Foto muito grande.' });
+    }
+    if (String(dados.recebedor).length > 200 || String(dados.observacao || '').length > 500) {
+      return responder({ status: 'error', message: 'Texto muito longo.' });
     }
 
     var aba = obterOuCriarAba();
@@ -91,16 +115,39 @@ function doPost(e) {
 }
 
 function verificarLogin(dados) {
+  var cache = CacheService.getScriptCache();
+  var chave = chaveFalha('login', String(dados.nome || ''));
+  if (estaBloqueado(cache, chave)) {
+    return responder({ status: 'error', message: 'Muitas tentativas. Aguarde alguns minutos.' });
+  }
   var senhaCorreta = MOTORISTAS[dados.nome];
   if (senhaCorreta && String(dados.senha) === String(senhaCorreta)) {
-    return responder({ status: 'ok' });
+    limparFalhas(cache, chave);
+    return responder({ status: 'ok', token: criarToken(String(dados.nome), 'motorista', TTL_MOTORISTA) });
   }
+  Utilities.sleep(700); // atrasa a automação de força bruta
+  registrarFalha(cache, chave);
   return responder({ status: 'error', message: 'Motorista ou senha incorretos.' });
 }
 
+function verificarAdminLogin(dados) {
+  var cache = CacheService.getScriptCache();
+  var chave = chaveFalha('admin', 'global');
+  if (estaBloqueado(cache, chave)) {
+    return responder({ status: 'error', message: 'Muitas tentativas. Aguarde alguns minutos.' });
+  }
+  if (String(dados.senha) === String(ADMIN_SENHA)) {
+    limparFalhas(cache, chave);
+    return responder({ status: 'ok', token: criarToken('admin', 'admin', TTL_ADMIN) });
+  }
+  Utilities.sleep(700);
+  registrarFalha(cache, chave);
+  return responder({ status: 'error', message: 'Senha incorreta.' });
+}
+
 function marcarFinalizado(dados) {
-  if (dados.senha !== ADMIN_SENHA) {
-    return responder({ status: 'error', message: 'Senha incorreta' });
+  if (!verificarToken(dados.token, 'admin')) {
+    return responder({ status: 'error', message: 'Sessão de administrador inválida.', authErro: true });
   }
   if (!dados.id) {
     return responder({ status: 'error', message: 'Comprovante sem ID' });
@@ -127,15 +174,14 @@ function idJaExiste(aba, id) {
 }
 
 function doGet(e) {
-  if (e.parameter.acao === 'listar') {
-    return listarComprovantes(e.parameter.senha);
-  }
+  // A listagem NÃO usa mais GET com a senha na URL (vazava em logs/histórico).
+  // Tudo do painel agora é POST com token de admin. Veja listarComprovantes.
   return ContentService.createTextOutput('API de comprovantes ativa ✅');
 }
 
-function listarComprovantes(senha) {
-  if (senha !== ADMIN_SENHA) {
-    return responder({ status: 'error', message: 'Senha incorreta' });
+function listarComprovantes(dados) {
+  if (!verificarToken(dados.token, 'admin')) {
+    return responder({ status: 'error', message: 'Sessão de administrador inválida.', authErro: true });
   }
   var aba = obterOuCriarAba();
   var valores = aba.getDataRange().getValues();
@@ -144,17 +190,15 @@ function listarComprovantes(senha) {
   var registros = valores
     .filter(function (linha) { return linha[1] || linha[2]; }) // ignora linhas vazias
     .map(function (linha) {
-      var idDrivePacote = extrairIdDrive(linha[4]);
-      var idDriveFachada = extrairIdDrive(linha[5]);
+      // devolve só os IDs dos arquivos (privados); a imagem é buscada sob
+      // demanda pela rota 'foto', autenticada — nada de link público
       return {
         dataHora: linha[0] instanceof Date ? linha[0].toISOString() : String(linha[0]),
         motorista: linha[1],
         recebedor: linha[2],
         observacao: linha[3],
-        fotoPacote: linha[4],
-        fotoPacoteImg: idDrivePacote ? ('https://drive.google.com/thumbnail?id=' + idDrivePacote + '&sz=w1600') : '',
-        fotoFachada: linha[5],
-        fotoFachadaImg: idDriveFachada ? ('https://drive.google.com/thumbnail?id=' + idDriveFachada + '&sz=w1600') : '',
+        fotoPacoteId: extrairIdDrive(linha[4]),
+        fotoFachadaId: extrairIdDrive(linha[5]),
         id: linha[6] ? String(linha[6]) : '',
         finalizado: linha[7] === true || String(linha[7]).toLowerCase() === 'true'
       };
@@ -162,6 +206,25 @@ function listarComprovantes(senha) {
     .reverse(); // mais recentes primeiro
 
   return responder({ status: 'ok', registros: registros });
+}
+
+// Devolve a imagem de um arquivo do Drive como data URL (base64). Exige token
+// de admin. Como o script é dono dos arquivos, consegue ler mesmo eles sendo
+// privados — assim as fotos deixam de precisar de compartilhamento público.
+function obterFoto(dados) {
+  if (!verificarToken(dados.token, 'admin')) {
+    return responder({ status: 'error', message: 'Sessão de administrador inválida.', authErro: true });
+  }
+  if (!dados.id) {
+    return responder({ status: 'error', message: 'Foto sem ID' });
+  }
+  try {
+    var blob = DriveApp.getFileById(dados.id).getBlob();
+    var dataUrl = 'data:' + blob.getContentType() + ';base64,' + Utilities.base64Encode(blob.getBytes());
+    return responder({ status: 'ok', dataUrl: dataUrl });
+  } catch (err) {
+    return responder({ status: 'error', message: 'Foto não encontrada.' });
+  }
 }
 
 function extrairIdDrive(url) {
@@ -173,6 +236,64 @@ function extrairIdDrive(url) {
 function responder(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
+}
+
+/* ---------- tokens de sessão assinados (HMAC-SHA256) ---------- */
+
+// base64 web-safe COM padding — o token vai no corpo do POST (não na URL),
+// então o '=' não atrapalha e garante que o decode na verificação funcione.
+function base64url(entrada) {
+  return Utilities.base64EncodeWebSafe(entrada);
+}
+
+// cria um token: base64url(payload) + '.' + base64url(assinatura)
+function criarToken(sub, role, ttlMs) {
+  var corpo = base64url(JSON.stringify({ sub: sub, role: role, exp: Date.now() + ttlMs }));
+  var assinatura = base64url(Utilities.computeHmacSha256Signature(corpo, SEGREDO));
+  return corpo + '.' + assinatura;
+}
+
+// devolve o payload se o token for válido (assinatura + validade + papel),
+// senão null. É assim que o servidor confia que a chamada veio de um login real.
+function verificarToken(token, roleEsperado) {
+  if (!token || typeof token !== 'string') return null;
+  var partes = token.split('.');
+  if (partes.length !== 2) return null;
+  var esperada = base64url(Utilities.computeHmacSha256Signature(partes[0], SEGREDO));
+  if (!comparaSeguro(partes[1], esperada)) return null;
+  var payload;
+  try {
+    payload = JSON.parse(Utilities.newBlob(Utilities.base64DecodeWebSafe(partes[0])).getDataAsString());
+  } catch (e) {
+    return null;
+  }
+  if (!payload || payload.role !== roleEsperado) return null;
+  if (!payload.exp || Date.now() > payload.exp) return null;
+  return payload;
+}
+
+// comparação em tempo constante (evita timing attack na verificação)
+function comparaSeguro(a, b) {
+  if (a.length !== b.length) return false;
+  var dif = 0;
+  for (var i = 0; i < a.length; i++) dif |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return dif === 0;
+}
+
+/* ---------- proteção contra força bruta (CacheService) ---------- */
+
+function chaveFalha(tipo, id) { return 'fail_' + tipo + '_' + id; }
+
+function estaBloqueado(cache, chave) {
+  return Number(cache.get(chave) || 0) >= MAX_FALHAS;
+}
+
+function registrarFalha(cache, chave) {
+  cache.put(chave, String(Number(cache.get(chave) || 0) + 1), JANELA_BLOQUEIO_SEG);
+}
+
+function limparFalhas(cache, chave) {
+  cache.remove(chave);
 }
 
 function obterOuCriarPasta() {
@@ -208,7 +329,8 @@ function salvarImagem(base64, pasta, nomeBase) {
   var extensao = mime.indexOf('png') > -1 ? '.png' : '.jpg';
   var blob = Utilities.newBlob(bytes, mime, nomeBase + extensao);
   var arquivo = pasta.createFile(blob);
-  arquivo.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  // Arquivo fica PRIVADO (sem compartilhamento público). O painel busca a
+  // imagem pela rota 'foto' (autenticada), que roda como dono e lê o privado.
   return arquivo.getUrl();
 }
 

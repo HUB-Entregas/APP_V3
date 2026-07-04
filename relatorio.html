@@ -2,12 +2,8 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<script>
-  // Sem motorista logado, volta para o login (mesma proteção do index).
-  if (!localStorage.getItem('motoristaSelecionado')) {
-    window.location.replace('./login.html');
-  }
-</script>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' https://script.google.com https://script.googleusercontent.com; worker-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
+<script src="./guarda.js" data-modo="requer-login"></script>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#12203A">
 <title>Meu desempenho — Comprovante de Entrega</title>
