@@ -300,8 +300,12 @@ input[type="text"]:focus, textarea:focus {
   font-weight: 700;
   cursor: pointer;
 }
-.camera-flash {
+.camera-acoes {
   margin-left: auto;
+  display: flex;
+  gap: 10px;
+}
+.camera-icone {
   flex-shrink: 0;
   width: 40px;
   height: 40px;
@@ -311,9 +315,53 @@ input[type="text"]:focus, textarea:focus {
   font-size: 18px;
   cursor: pointer;
 }
-.camera-flash.flash-ligado {
+.camera-icone.flash-ligado {
   background: #F5C518;
   box-shadow: 0 0 12px rgba(245, 197, 24, 0.7);
+}
+
+/* barra de zoom (aparece só quando o aparelho suporta) */
+.camera-zoom {
+  position: absolute;
+  bottom: 118px;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 0 32px;
+}
+.camera-zoom input[type="range"] {
+  flex: 1;
+  max-width: 260px;
+  accent-color: #fff;
+}
+.camera-zoom-valor {
+  color: #fff;
+  font-size: 13px;
+  font-weight: 800;
+  min-width: 34px;
+  text-align: center;
+  background: rgba(0, 0, 0, 0.45);
+  border-radius: 12px;
+  padding: 3px 8px;
+}
+
+/* indicador de foco por toque */
+.foco-indicador {
+  position: fixed;
+  width: 64px;
+  height: 64px;
+  border: 2px solid #F5C518;
+  border-radius: 10px;
+  pointer-events: none;
+  z-index: 210;
+}
+.foco-indicador.foco-anima { animation: focoPulso 0.5s ease-out; }
+@keyframes focoPulso {
+  0% { transform: scale(1.5); opacity: 0.3; }
+  100% { transform: scale(1); opacity: 1; }
 }
 .camera-controles {
   position: absolute;

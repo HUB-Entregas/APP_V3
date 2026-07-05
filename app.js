@@ -169,6 +169,37 @@ async function handleFotoSelecionada(tipo, e) {
 }
 
 // ---------- câmera ao vivo ----------
+// Em Android com várias lentes, o navegador às vezes abre a ULTRA-WIDE (a
+// "0.5x") — que além do enquadramento errado normalmente NÃO tem flash. Por
+// isso: (1) se a câmera abrir com zoom < 1x, forçamos 1x (lente principal);
+// (2) há um botão 🔁 para trocar de lente manualmente, e a escolha fica salva;
+// (3) zoom nunca desce abaixo de 1x (não cai na ultra-wide sem querer).
+
+let camerasDisponiveis = []; // câmeras traseiras [{id, label}] p/ o botão 🔁
+
+function pegarTrackVideo() {
+  return cameraStream && cameraStream.getVideoTracks ? cameraStream.getVideoTracks()[0] : null;
+}
+
+function capacidadesTrack() {
+  const track = pegarTrackVideo();
+  try { return (track && track.getCapabilities) ? (track.getCapabilities() || {}) : {}; }
+  catch (e) { return {}; }
+}
+
+async function obterStream() {
+  // 1º tenta a lente que o motorista escolheu da última vez; senão, a traseira
+  const salvo = localStorage.getItem('cameraDeviceId');
+  const tentativas = [];
+  if (salvo) {
+    tentativas.push({ video: { deviceId: { exact: salvo }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false });
+  }
+  tentativas.push({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false });
+  for (const c of tentativas) {
+    try { return await navigator.mediaDevices.getUserMedia(c); } catch (err) { /* tenta a próxima */ }
+  }
+  return null;
+}
 
 async function abrirCamera(tipos) {
   cameraFila = tipos.slice();
@@ -177,12 +208,8 @@ async function abrirCamera(tipos) {
   if (!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)) {
     return abrirFallbackNativo();
   }
-  try {
-    cameraStream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
-      audio: false
-    });
-  } catch (err) {
+  cameraStream = await obterStream();
+  if (!cameraStream) {
     return abrirFallbackNativo(); // sem permissão/câmera: cai no seletor nativo
   }
 
@@ -191,31 +218,166 @@ async function abrirCamera(tipos) {
   el('cameraOverlay').classList.remove('hidden');
   atualizarRotuloCamera();
   try { await video.play(); } catch (e) { /* alguns navegadores já dão play sozinho */ }
+  await configurarLenteEControles();
+}
+
+// Ajusta a lente e monta os controles (zoom/foco/flash/trocar) para o stream atual.
+async function configurarLenteEControles() {
+  const caps = capacidadesTrack();
+
+  // câmera "lógica" que abre no 0.5x (ultra-wide): volta para a principal (1x)
+  if (caps.zoom && caps.zoom.min < 1) {
+    try {
+      await pegarTrackVideo().applyConstraints({ advanced: [{ zoom: Math.min(1, caps.zoom.max) }] });
+    } catch (e) { /* aparelho não deixou — segue como está */ }
+  }
+
+  configurarZoomUI(caps);
+  configurarFoco(caps);
   configurarFlash();
+  await listarCamerasTraseiras();
+  el('cameraTrocar').classList.toggle('hidden', camerasDisponiveis.length < 2);
+}
+
+// ---------- trocar de lente (🔁) ----------
+
+async function listarCamerasTraseiras() {
+  try {
+    const devs = await navigator.mediaDevices.enumerateDevices();
+    const videos = devs.filter((d) => d.kind === 'videoinput');
+    // descarta as frontais pelo rótulo; se os rótulos vierem vazios, mantém todas
+    const traseiras = videos.filter((d) => !/front|frontal|user|selfie/i.test(d.label || ''));
+    camerasDisponiveis = (traseiras.length ? traseiras : videos).map((d) => ({ id: d.deviceId, label: d.label || '' }));
+  } catch (e) {
+    camerasDisponiveis = [];
+  }
+}
+
+async function trocarCamera() {
+  if (camerasDisponiveis.length < 2) return;
+  const track = pegarTrackVideo();
+  const atualId = (track && track.getSettings) ? (track.getSettings().deviceId || '') : '';
+  let idx = camerasDisponiveis.findIndex((c) => c.id === atualId);
+  idx = (idx + 1) % camerasDisponiveis.length;
+  const alvo = camerasDisponiveis[idx];
+
+  if (cameraStream) { cameraStream.getTracks().forEach((t) => t.stop()); cameraStream = null; }
+  try {
+    cameraStream = await navigator.mediaDevices.getUserMedia({
+      video: { deviceId: { exact: alvo.id }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+      audio: false
+    });
+  } catch (err) {
+    fecharCamera();
+    mostrarAviso('Não foi possível trocar de câmera.');
+    return;
+  }
+  localStorage.setItem('cameraDeviceId', alvo.id); // lembra a lente escolhida
+  const video = el('cameraVideo');
+  video.srcObject = cameraStream;
+  try { await video.play(); } catch (e) { }
+  await configurarLenteEControles();
+}
+
+// ---------- zoom ----------
+
+function configurarZoomUI(caps) {
+  const wrap = el('cameraZoomWrap');
+  const slider = el('cameraZoom');
+  if (!caps.zoom || !(caps.zoom.max > 1)) { wrap.classList.add('hidden'); return; }
+  // nunca abaixo de 1x — impede cair na ultra-wide pelo zoom
+  const min = Math.max(1, caps.zoom.min);
+  slider.min = String(min);
+  slider.max = String(caps.zoom.max);
+  slider.step = String(caps.zoom.step || 0.1);
+  slider.value = String(min);
+  el('cameraZoomValor').textContent = formatarZoom(min);
+  wrap.classList.remove('hidden');
+}
+
+function formatarZoom(v) {
+  return (Math.round(v * 10) / 10).toString().replace(/\.0$/, '') + 'x';
+}
+
+async function aplicarZoom(valor) {
+  const track = pegarTrackVideo();
+  if (!track) return;
+  try {
+    await track.applyConstraints({ advanced: [{ zoom: valor }] });
+    el('cameraZoomValor').textContent = formatarZoom(valor);
+  } catch (e) { /* aparelho não deixou — mantém o zoom atual */ }
+}
+
+// ---------- foco por toque ----------
+
+function configurarFoco(caps) {
+  // liga o foco contínuo por padrão, quando o aparelho expõe esse controle
+  if (caps.focusMode && caps.focusMode.indexOf('continuous') >= 0) {
+    try { pegarTrackVideo().applyConstraints({ advanced: [{ focusMode: 'continuous' }] }); } catch (e) { }
+  }
+}
+
+async function focarNoPonto(e) {
+  const video = el('cameraVideo');
+  if (!video.videoWidth) return;
+  mostrarIndicadorFoco(e.clientX, e.clientY);
+
+  const track = pegarTrackVideo();
+  if (!track) return;
+  const caps = capacidadesTrack();
+  const rect = video.getBoundingClientRect();
+  const ajustes = [];
+  if (caps.pointsOfInterest) {
+    ajustes.push({ pointsOfInterest: [{ x: (e.clientX - rect.left) / rect.width, y: (e.clientY - rect.top) / rect.height }] });
+  }
+  if (caps.focusMode && caps.focusMode.indexOf('single-shot') >= 0) {
+    ajustes.push({ focusMode: 'single-shot' });
+  }
+  if (!ajustes.length) return; // aparelho não expõe foco — o indicador já deu o feedback
+  try { await track.applyConstraints({ advanced: ajustes }); } catch (err) { }
+  // depois de focar no ponto, volta ao foco contínuo
+  setTimeout(() => {
+    try {
+      if (caps.focusMode && caps.focusMode.indexOf('continuous') >= 0) {
+        track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] });
+      }
+    } catch (err) { }
+  }, 3000);
+}
+
+let focoTimer = null;
+function mostrarIndicadorFoco(x, y) {
+  const ind = el('focoIndicador');
+  ind.style.left = (x - 32) + 'px';
+  ind.style.top = (y - 32) + 'px';
+  ind.classList.remove('hidden');
+  ind.classList.remove('foco-anima');
+  void ind.offsetWidth; // reinicia a animação CSS
+  ind.classList.add('foco-anima');
+  clearTimeout(focoTimer);
+  focoTimer = setTimeout(() => ind.classList.add('hidden'), 900);
 }
 
 // ---------- flash (lanterna do celular) ----------
-// Só funciona onde o navegador expõe o "torch" da câmera (Android/Chrome).
-// No iPhone/Safari não é suportado, então o botão fica escondido.
-
-function pegarTrackVideo() {
-  return cameraStream && cameraStream.getVideoTracks ? cameraStream.getVideoTracks()[0] : null;
-}
+// Só funciona onde o navegador expõe o "torch" da câmera (Android/Chrome) — e
+// só na lente que TEM flash (a principal; a ultra-wide normalmente não tem).
+// Em alguns aparelhos as capacidades demoram a aparecer depois do play(), por
+// isso a verificação roda de novo um instante depois.
 
 function configurarFlash() {
-  const btn = el('cameraFlash');
-  const track = pegarTrackVideo();
-  let suporta = false;
-  try {
-    suporta = !!(track && track.getCapabilities && track.getCapabilities().torch);
-  } catch (e) { suporta = false; }
-
   flashLigado = false;
-  btn.classList.remove('flash-ligado');
-  btn.classList.toggle('hidden', !suporta);
+  el('cameraFlash').classList.remove('flash-ligado');
+  verificarSuporteFlash();
+  setTimeout(verificarSuporteFlash, 800); // capacidades podem chegar atrasadas
+}
 
+function verificarSuporteFlash() {
+  if (!cameraStream) return; // câmera já fechada
+  const btn = el('cameraFlash');
+  const suporta = !!capacidadesTrack().torch;
+  btn.classList.toggle('hidden', !suporta);
   // reaplica a preferência salva (o motorista não precisa religar toda vez)
-  if (suporta && localStorage.getItem('flashLigado') === '1') {
+  if (suporta && !flashLigado && localStorage.getItem('flashLigado') === '1') {
     aplicarFlash(true);
   }
 }
@@ -290,6 +452,8 @@ function fecharCamera() {
   el('cameraFlash').classList.remove('flash-ligado');
   el('cameraVideo').srcObject = null;
   el('cameraOverlay').classList.add('hidden');
+  el('cameraZoomWrap').classList.add('hidden');
+  el('focoIndicador').classList.add('hidden');
   cameraFila = [];
 }
 
@@ -583,6 +747,9 @@ window.addEventListener('DOMContentLoaded', async () => {
   el('cameraDisparo').addEventListener('click', dispararFoto);
   el('cameraFechar').addEventListener('click', fecharCamera);
   el('cameraFlash').addEventListener('click', alternarFlash);
+  el('cameraTrocar').addEventListener('click', trocarCamera);
+  el('cameraZoom').addEventListener('input', (e) => aplicarZoom(parseFloat(e.target.value)));
+  el('cameraVideo').addEventListener('click', focarNoPonto); // toque no vídeo = focar ali
 
   el('formEntrega').addEventListener('submit', handleSubmit);
   el('btnSincronizar').addEventListener('click', handleSincronizarClick);

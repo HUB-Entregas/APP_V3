@@ -84,7 +84,15 @@
   <div class="camera-topo">
     <button type="button" id="cameraFechar" class="camera-fechar" aria-label="Fechar câmera">✕</button>
     <span id="cameraRotulo" class="camera-rotulo"></span>
-    <button type="button" id="cameraFlash" class="camera-flash hidden" aria-label="Ligar/desligar flash">🔦</button>
+    <div class="camera-acoes">
+      <button type="button" id="cameraTrocar" class="camera-icone hidden" aria-label="Trocar câmera">🔁</button>
+      <button type="button" id="cameraFlash" class="camera-icone hidden" aria-label="Ligar/desligar flash">🔦</button>
+    </div>
+  </div>
+  <div id="focoIndicador" class="foco-indicador hidden"></div>
+  <div id="cameraZoomWrap" class="camera-zoom hidden">
+    <input type="range" id="cameraZoom" aria-label="Zoom">
+    <span id="cameraZoomValor" class="camera-zoom-valor">1x</span>
   </div>
   <div class="camera-controles">
     <button type="button" id="cameraDisparo" class="camera-disparo" aria-label="Tirar foto"></button>
