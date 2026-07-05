@@ -34,17 +34,25 @@
 
   <form id="formEntrega">
     <div class="campo">
-      <div class="eyebrow"><span class="num">01</span><label for="recebedor">Nome do recebedor</label></div>
+      <div class="eyebrow"><span class="num">01</span><label>Empresa desta entrega</label></div>
+      <div class="empresa-toggle">
+        <button type="button" class="btn-empresa btn-empresa-imille" data-empresa="Imille">Imille</button>
+        <button type="button" class="btn-empresa btn-empresa-anjun" data-empresa="Anjun">Anjun</button>
+      </div>
+    </div>
+
+    <div class="campo">
+      <div class="eyebrow"><span class="num">02</span><label for="recebedor">Nome do recebedor</label></div>
       <input type="text" id="recebedor" placeholder="Ex: João Silva" autocomplete="name" autocapitalize="words" required>
     </div>
 
     <div class="campo">
-      <div class="eyebrow"><span class="num">02</span><label for="observacao">Observação (opcional)</label></div>
+      <div class="eyebrow"><span class="num">03</span><label for="observacao">Observação (opcional)</label></div>
       <textarea id="observacao" placeholder="Ex: entregue na portaria"></textarea>
     </div>
 
     <div class="campo">
-      <div class="eyebrow"><span class="num">03</span><label>Fotos da entrega</label></div>
+      <div class="eyebrow"><span class="num">04</span><label>Fotos da entrega</label></div>
       <div class="fotos-slots">
         <button type="button" class="foto-slot" id="slotPacote">
           <img class="foto-slot-img" id="fotoPacotePreview" alt="Foto do pacote">

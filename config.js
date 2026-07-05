@@ -9,7 +9,7 @@
 // uma confirmação simples pra evitar que alguém entre no nome errado.
 // ============================================================
 const CONFIG = {
-  API_URL: 'https://script.google.com/macros/s/AKfycbzb_KrAEOtEFcW5fSe7co6csV4ta-oISRCAE8j-YANRG_9YC4pAcYSACcNwSo_ioihj/exec',
+  API_URL: 'https://script.google.com/macros/s/AKfycbyspQb3SCve82PQNYZEHj6HB23uugrQML9HeGOOuK_eKfpTCC2MHhheP0_tf44N31bD/exec',
   // Não há mais senha nem token neste arquivo público. A escrita de
   // comprovantes agora exige um token de sessão emitido no login (guardado no
   // aparelho). As SENHAS dos motoristas ficam no backend (Code.gs, MOTORISTAS).

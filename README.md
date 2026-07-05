@@ -24,8 +24,11 @@ Apps Script (gratuitos), e você exporta/sincroniza para Excel quando quiser.
    - Se o aparelho for usado por outra pessoa em algum dia, é só tocar em
      **"Trocar"** na tela de comprovantes — isso volta para a tela de login,
      onde é só escolher outro motorista da lista e digitar a senha dele.
-3. Preenche o nome do recebedor, tira a **foto do pacote**, tira a **foto da
-   fachada** do local de entrega e toca em **Enviar**.
+3. Toca na **empresa** daquela entrega (**Imille** ou **Anjun** — um toque),
+   preenche o nome do recebedor, tira a **foto do pacote**, tira a **foto da
+   fachada** do local de entrega e toca em **Enviar**. A escolha da empresa
+   zera a cada envio de propósito: como o motorista pode atender as duas no
+   mesmo dia, ele informa em toda entrega — nunca sai registrado errado.
 4. Se tiver internet, o comprovante já sai daquela tela sincronizado ("ENVIADO").
 5. Se **não** tiver internet, fica guardado no celular como "PENDENTE" e é
    enviado sozinho assim que a conexão voltar — não precisa reabrir o app nem

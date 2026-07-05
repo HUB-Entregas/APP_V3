@@ -51,7 +51,9 @@ var MOTORISTAS = {
 var NOME_ABA = 'Entregas';
 var NOME_ABA_RELATORIO = 'Desempenho';
 var NOME_PASTA_DRIVE = 'Comprovantes de Entrega';
-var CABECALHO = ['Data/Hora', 'Motorista', 'Recebedor', 'Observações', 'Foto Pacote', 'Foto Fachada', 'ID', 'Finalizado'];
+// 'Empresa' fica no FINAL de propósito: a migração automática (obterOuCriarAba)
+// acrescenta colunas novas no fim sem mexer nas linhas já gravadas.
+var CABECALHO = ['Data/Hora', 'Motorista', 'Recebedor', 'Observações', 'Foto Pacote', 'Foto Fachada', 'ID', 'Finalizado', 'Empresa'];
 
 function doPost(e) {
   try {
@@ -84,6 +86,8 @@ function doPost(e) {
     if (String(dados.recebedor).length > 200 || String(dados.observacao || '').length > 500) {
       return responder({ status: 'error', message: 'Texto muito longo.' });
     }
+    // empresa: só aceita os valores conhecidos (evita lixo na planilha)
+    var empresa = (dados.empresa === 'Imille' || dados.empresa === 'Anjun') ? dados.empresa : '';
 
     var aba = obterOuCriarAba();
 
@@ -106,7 +110,8 @@ function doPost(e) {
       urlFotoPacote,
       urlFotoFachada,
       dados.id || '',
-      false
+      false,
+      empresa
     ]);
 
     atualizarRelatorioSeNecessario(); // mantém a aba "Desempenho" em dia
@@ -202,7 +207,8 @@ function listarComprovantes(dados) {
         fotoPacoteId: extrairIdDrive(linha[4]),
         fotoFachadaId: extrairIdDrive(linha[5]),
         id: linha[6] ? String(linha[6]) : '',
-        finalizado: linha[7] === true || String(linha[7]).toLowerCase() === 'true'
+        finalizado: linha[7] === true || String(linha[7]).toLowerCase() === 'true',
+        empresa: linha[8] ? String(linha[8]) : ''
       };
     })
     .reverse(); // mais recentes primeiro

@@ -27,6 +27,11 @@ let fotoPacoteBase64 = '';
 let fotoFachadaBase64 = '';
 let sincronizando = false;
 
+// Empresa da entrega ATUAL (Imille/Anjun). Zera a cada envio de propósito:
+// o motorista pode alternar entre as duas no mesmo dia, então precisa
+// informar em toda entrega — assim nunca sai registrado na empresa errada.
+let empresaSelecionada = '';
+
 // câmera ao vivo (tira as 2 fotos numa tela só)
 let cameraStream = null;
 let cameraFila = [];   // tipos a capturar em sequência, ex: ['pacote','fachada']
@@ -95,6 +100,20 @@ async function listarComprovantesLocais() {
   });
 }
 
+
+// ---------- empresa da entrega ----------
+
+function selecionarEmpresa(nome) {
+  empresaSelecionada = nome;
+  document.querySelectorAll('.btn-empresa').forEach((b) => {
+    b.classList.toggle('selecionada', b.dataset.empresa === nome);
+  });
+}
+
+function limparEmpresa() {
+  empresaSelecionada = '';
+  document.querySelectorAll('.btn-empresa').forEach((b) => b.classList.remove('selecionada'));
+}
 
 // ---------- motorista (já autenticado em login.html) ----------
 
@@ -485,6 +504,7 @@ async function enviarAoBackend(registro) {
         token: token,
         id: registro.id,
         motorista: registro.motorista,
+        empresa: registro.empresa || '',
         recebedor: registro.recebedor,
         observacao: registro.observacao,
         fotoPacote: registro.fotoPacote,
@@ -576,6 +596,7 @@ async function handleSubmit(e) {
   const observacao = el('observacao').value.trim();
 
   if (!motorista) return mostrarAviso('Selecione o motorista antes de enviar.');
+  if (!empresaSelecionada) return mostrarAviso('Toque em Imille ou Anjun para informar a empresa desta entrega.');
   if (!recebedor) return mostrarAviso('Preencha o nome do recebedor.');
   if (!fotoPacoteBase64) return mostrarAviso('Tire a foto do pacote.');
   if (!fotoFachadaBase64) return mostrarAviso('Tire a foto da fachada.');
@@ -588,6 +609,7 @@ async function handleSubmit(e) {
     const registro = {
       id: gerarId(),
       motorista,
+      empresa: empresaSelecionada,
       recebedor,
       observacao,
       fotoPacote: fotoPacoteBase64,
@@ -609,6 +631,7 @@ async function handleSubmit(e) {
 function resetarFormulario() {
   el('recebedor').value = '';
   el('observacao').value = '';
+  limparEmpresa(); // obriga a informar a empresa de novo na próxima entrega
   resetarSlotFoto('pacote');
   resetarSlotFoto('fachada');
 }
@@ -683,7 +706,7 @@ async function renderHistorico() {
       ${fotoMini(r.fotoFachada, 'Foto da fachada de ' + r.recebedor)}
       <div class="item-historico-info">
         <strong>${escapeHtml(r.recebedor)}</strong>
-        <span>${escapeHtml(r.motorista)} · ${formatarData(r.timestamp)}</span>
+        <span>${r.empresa ? `<span class="tag-empresa tag-empresa-${escapeHtml(String(r.empresa).toLowerCase())}">${escapeHtml(r.empresa)}</span>` : ''}${escapeHtml(r.motorista)} · ${formatarData(r.timestamp)}</span>
         ${comErro(r) ? `<span class="item-historico-erro-msg">Falha ao enviar: ${escapeHtml(r.ultimoErro)}</span>
         <button type="button" class="btn-tentar" data-id="${escapeHtml(r.id)}">Tentar de novo</button>` : ''}
       </div>
@@ -734,6 +757,11 @@ window.addEventListener('DOMContentLoaded', async () => {
     localStorage.removeItem('motoristaSelecionado');
     localStorage.removeItem('authToken');
     window.location.href = './login.html';
+  });
+
+  // empresa da entrega: um toque em Imille ou Anjun
+  document.querySelectorAll('.btn-empresa').forEach((b) => {
+    b.addEventListener('click', () => selecionarEmpresa(b.dataset.empresa));
   });
 
   el('fotoPacoteInput').addEventListener('change', (e) => handleFotoSelecionada('pacote', e));

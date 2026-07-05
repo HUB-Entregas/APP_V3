@@ -118,7 +118,8 @@ function filtrarPorBusca(lista) {
   if (!termo) return lista;
   return lista.filter((r) =>
     (r.recebedor || '').toLowerCase().includes(termo) ||
-    (r.motorista || '').toLowerCase().includes(termo)
+    (r.motorista || '').toLowerCase().includes(termo) ||
+    (r.empresa || '').toLowerCase().includes(termo)
   );
 }
 
@@ -150,6 +151,7 @@ function renderTabela(lista) {
   const linhas = lista.map((r, i) => `
     <tr>
       <td>${formatarData(r.dataHora)}</td>
+      <td>${r.empresa ? `<span class="tag-empresa-admin tag-${escapeHtml(String(r.empresa).toLowerCase())}">${escapeHtml(r.empresa)}</span>` : '—'}</td>
       <td>${escapeHtml(r.motorista)}</td>
       <td>${escapeHtml(r.recebedor)}</td>
       <td>${escapeHtml(r.observacao)}</td>
@@ -178,7 +180,7 @@ function abrirModal(registro, tipoInicial) {
   modalIndice = inicial >= 0 ? inicial : 0;
 
   el('modalRecebedor').textContent = registro.recebedor || '(sem recebedor)';
-  el('modalMeta').textContent = `${registro.motorista || '—'} · ${formatarData(registro.dataHora)}`;
+  el('modalMeta').textContent = `${registro.empresa ? registro.empresa + ' · ' : ''}${registro.motorista || '—'} · ${formatarData(registro.dataHora)}`;
   const obs = el('modalObs');
   obs.textContent = registro.observacao || '';
   obs.classList.toggle('hidden', !registro.observacao);

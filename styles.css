@@ -185,6 +185,48 @@ input[type="text"]:focus, textarea:focus {
 .login-card .btn-enviar { padding: 13px; }
 .login-card .aviso { margin: 14px 0 0; }
 
+/* --- empresa da entrega (Imille / Anjun) --- */
+.empresa-toggle {
+  display: flex;
+  gap: 10px;
+}
+.btn-empresa {
+  flex: 1;
+  padding: 16px;
+  border: 2px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+  color: var(--ink-soft);
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+.btn-empresa:active { transform: scale(0.98); }
+.btn-empresa-imille.selecionada {
+  background: var(--steel);
+  border-color: var(--steel);
+  color: #fff;
+}
+.btn-empresa-anjun.selecionada {
+  background: var(--orange);
+  border-color: var(--orange);
+  color: #fff;
+}
+.btn-empresa.selecionada::before { content: '✓ '; }
+
+/* etiqueta da empresa no histórico */
+.tag-empresa {
+  font-size: 10.5px;
+  font-weight: 800;
+  padding: 2px 7px;
+  border-radius: 8px;
+  color: #fff;
+  margin-right: 6px;
+}
+.tag-empresa-imille { background: var(--steel); }
+.tag-empresa-anjun { background: var(--orange); }
+
 /* --- fotos da entrega (2 slots + botão de câmera) --- */
 .fotos-slots {
   display: flex;
