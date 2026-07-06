@@ -230,13 +230,22 @@ tbody a:hover { text-decoration: underline; }
 .modal-rodape {
   padding: 12px 18px;
   padding-bottom: max(12px, env(safe-area-inset-bottom));
-  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
 }
 .modal-legenda {
   color: rgba(247, 247, 243, 0.85);
   font-size: 13px;
   font-weight: 600;
 }
+/* botão Finalizar dentro do visualizador */
+.modal-finalizar {
+  font-size: 13px;
+  padding: 9px 20px;
+}
+.modal-finalizar:disabled { opacity: 0.6; cursor: wait; }
 
 /* --- botão finalizado --- */
 .btn-finalizar {

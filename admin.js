@@ -167,6 +167,7 @@ function renderTabela(lista) {
 // 'foto' (autenticada) só quando o admin abre o modal — nada é carregado à toa.
 let modalFotos = [];   // [{ id, legenda }] do comprovante aberto
 let modalIndice = 0;
+let modalRegistro = null; // comprovante aberto no modal (p/ o botão Finalizar)
 let zoom = 1, panX = 0, panY = 0;
 let arrastando = false, arrasteOrigem = null, arrastou = false;
 
@@ -185,8 +186,32 @@ function abrirModal(registro, tipoInicial) {
   obs.textContent = registro.observacao || '';
   obs.classList.toggle('hidden', !registro.observacao);
 
+  modalRegistro = registro;
+  atualizarBotaoModalFinalizar();
+
   el('modalFoto').classList.remove('hidden');
   mostrarFotoAtual();
+}
+
+// Botão "Finalizar" dentro do visualizador — o admin marca a entrega sem
+// precisar fechar a foto e procurar a linha na tabela.
+function atualizarBotaoModalFinalizar() {
+  const btn = el('modalFinalizar');
+  if (!modalRegistro || !modalRegistro.id) { btn.classList.add('hidden'); return; }
+  btn.classList.remove('hidden');
+  const finalizado = !!modalRegistro.finalizado;
+  btn.classList.toggle('is-finalizado', finalizado);
+  btn.textContent = finalizado ? '✔ Finalizado' : 'Finalizar';
+}
+
+async function finalizarDoModal() {
+  if (!modalRegistro || !modalRegistro.id) return;
+  const btn = el('modalFinalizar');
+  btn.disabled = true;
+  // reusa o mesmo fluxo da tabela (otimista + reverte se falhar)
+  await toggleFinalizado(modalRegistro.id, !modalRegistro.finalizado);
+  btn.disabled = false;
+  atualizarBotaoModalFinalizar();
 }
 
 async function mostrarFotoAtual() {
@@ -229,6 +254,20 @@ function navegarFoto(delta) {
   mostrarFotoAtual();
 }
 
+// Cola as setas na borda da FOTO (não na borda da tela) para acesso rápido.
+// Recalculado quando a imagem carrega e quando a janela muda de tamanho.
+function posicionarSetas() {
+  const esq = el('modalAnterior');
+  const dir = el('modalProximo');
+  if (el('modalFoto').classList.contains('hidden') || esq.classList.contains('hidden')) return;
+  const palco = el('modalPalco').getBoundingClientRect();
+  const img = el('modalImg').getBoundingClientRect();
+  if (!img.width) { esq.style.left = '10px'; dir.style.right = '10px'; return; }
+  // 52 = largura da seta (44) + 8px de folga; nunca sai da tela (mín. 8px)
+  esq.style.left = Math.max(8, img.left - palco.left - 52) + 'px';
+  dir.style.right = Math.max(8, palco.right - img.right - 52) + 'px';
+}
+
 function resetarZoom() {
   zoom = 1; panX = 0; panY = 0;
   el('modalImg').classList.remove('is-zoom');
@@ -253,6 +292,7 @@ function fecharFoto() {
   el('modalFoto').classList.add('hidden');
   el('modalImg').src = '';
   el('modalCarregando').classList.add('hidden');
+  modalRegistro = null;
   resetarZoom();
 }
 
@@ -304,6 +344,9 @@ window.addEventListener('DOMContentLoaded', () => {
   el('modalFechar').addEventListener('click', fecharFoto);
   el('modalAnterior').addEventListener('click', () => navegarFoto(-1));
   el('modalProximo').addEventListener('click', () => navegarFoto(1));
+  el('modalFinalizar').addEventListener('click', finalizarDoModal);
+  el('modalImg').addEventListener('load', posicionarSetas);
+  window.addEventListener('resize', posicionarSetas);
 
   // clicar no fundo (fora da imagem/setas) fecha
   el('modalPalco').addEventListener('click', (e) => {
